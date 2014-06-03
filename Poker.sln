@@ -1,0 +1,37 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 2012
+Project("{4925A630-B079-445d-BCD4-3A9C94FE9307}") = "Poker", "Poker\Poker.fsproj", "{833AFE1E-AF0E-47B8-A622-9F7BCDE8B7A3}"
+EndProject
+Project("{4925A630-B079-445d-BCD4-3A9C94FE9307}") = "PokerTests", "PokerTests\PokerTests.fsproj", "{DFD17754-3601-45EF-88CA-5CD7116C748C}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x86 = Debug|x86
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{833AFE1E-AF0E-47B8-A622-9F7BCDE8B7A3}.Debug|x86.ActiveCfg = Debug|x86
+		{833AFE1E-AF0E-47B8-A622-9F7BCDE8B7A3}.Debug|x86.Build.0 = Debug|x86
+		{833AFE1E-AF0E-47B8-A622-9F7BCDE8B7A3}.Release|x86.ActiveCfg = Release|x86
+		{833AFE1E-AF0E-47B8-A622-9F7BCDE8B7A3}.Release|x86.Build.0 = Release|x86
+		{DFD17754-3601-45EF-88CA-5CD7116C748C}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{DFD17754-3601-45EF-88CA-5CD7116C748C}.Debug|x86.Build.0 = Debug|Any CPU
+		{DFD17754-3601-45EF-88CA-5CD7116C748C}.Release|x86.ActiveCfg = Release|Any CPU
+		{DFD17754-3601-45EF-88CA-5CD7116C748C}.Release|x86.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(MonoDevelopProperties) = preSolution
+		StartupItem = Poker\Poker.fsproj
+		Policies = $0
+		$0.TextStylePolicy = $1
+		$1.inheritsSet = null
+		$1.scope = text/x-fsharp
+		$0.TextStylePolicy = $2
+		$2.TabWidth = 2
+		$2.IndentWidth = 2
+		$2.NoTabsAfterNonTabs = True
+		$2.inheritsSet = VisualStudio
+		$2.inheritsScope = text/plain
+		$2.scope = text/plain
+	EndGlobalSection
+EndGlobal
