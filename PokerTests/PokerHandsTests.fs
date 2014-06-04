@@ -1,6 +1,7 @@
-﻿open System
+﻿namespace LearnYouSomePoker
+open System
 open NUnit.Framework
-open Poker.Game
+open Poker
 
 
 [<TestFixture>]

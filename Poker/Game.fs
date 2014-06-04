@@ -1,7 +1,8 @@
-﻿namespace Poker
+﻿namespace LearnYouSomePoker
 open System
+open MathNet.Numerics.Probability
 
-module Game =
+module Poker =
   type Rank = 
   | R of int * string
     override r.ToString() =
@@ -199,11 +200,15 @@ module Game =
       | IsPair f -> f
       | HighCard c -> c
 
-  type Deck = 
-  | D of seq<Card>
-    static member New = [ for r in Rank.Ranks do 
-                          for s in Suit.Suits -> C (r, s)]
-    
-  type Dealer() = 
-    static member Shuffle = Deck.New
-    
+  type Deck() = 
+    let rng = new MathNet.Numerics.Random.MersenneTwister()
+    let mutable deck = [| for r in Rank.Ranks do
+                          for s in Suit.Suits -> C (r, s) |]
+    member __.NextCard() = 
+      let slot = rng.Next(0, deck.Length)
+      let card = deck.[slot]
+      deck <- Array.filter (fun c -> not (Object.ReferenceEquals(c, card))) deck
+      card
+
+    interface IDisposable with
+      override __.Dispose() = rng.Dispose()
