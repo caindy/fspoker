@@ -9,7 +9,7 @@ module Game =
       | R (_,f) -> f
     member r.Value = let (R(v,_)) = r in v
     static member Ranks = seq { 
-      for i in [1..14] do yield R(i, i.ToString())
+      for i in [1..10] do yield R(i, i.ToString())
       yield! [|  R(11, "J") ; R(12, "Q") ; R(13, "K") ; R(14, "A") |]
     }
     static member Parse(s) = Seq.tryFind (fun r -> r.ToString() = s) Rank.Ranks
@@ -58,8 +58,6 @@ module Game =
           | :? Card as y -> compare x.Rank y.Rank
           | _ -> invalidArg "yobj" "cannot compare values of different types"
     
-
-
   type Hand(h: seq<Card>) = 
     let cards = h |> Seq.sort |> Seq.toList |> List.rev
     member __.Cards = cards 
@@ -78,7 +76,7 @@ module Game =
         let compareHands x y = 
           let highcard = compare
           let xRank = HandRanking.For x
-          let yRank = HandRanking.For (yobj :?> Hand)
+          let yRank = HandRanking.For y
           match xRank, yRank with
           | ``Straight Flush``(xf), ``Straight Flush``(yf)   -> highcard xf yf
           | ``Four of a Kind``(xf), ``Four of a Kind``(yf)   -> highcard xf yf
@@ -142,8 +140,8 @@ module Game =
         | IsFlush _ & IsStraight s -> Some (``Straight Flush`` h.Cards)
         | _ -> None
 
-      let (|Of_a_Kind|_|) i (h: Hand) =
-        let hands = makeHands h.Cards i
+      let (|Of_a_Kind|_|) i (h: seq<Card>) =
+        let hands = makeHands h i
         let kinds = seq {
           for hand in hands do
             let (C (r, _)) as c = List.head hand 
@@ -155,20 +153,57 @@ module Game =
           let max = kinds |> Seq.max
           Some max.Rank
       let (|Three_of_a_Kind|_|) (h: Hand) = 
-        match h with
-        | Of_a_Kind 3 f -> Some (``Three of a Kind`` f)
+        match h.Cards with
+        | Of_a_Kind 3 r -> Some r
         | _ -> None
-      let (|Four_of_a_Kind|_|) = function
-        | Of_a_Kind 4 f -> Some (``Four of a Kind`` f)
+      let (|Four_of_a_Kind|_|) (h: Hand) = 
+        match h.Cards with
+        | Of_a_Kind 4 r -> Some r
         | _ -> None 
-
       
+      let (|FullHouse|_|) = function
+        | Three_of_a_Kind r -> 
+          let rest = h.Cards |> List.filter (fun c ->  c.Rank <> r)
+          match rest with
+          | Of_a_Kind 2 f -> Some (``Full House`` (r, f))
+          | _ -> None
+        | _ -> None
+
+      let (|HighPair|_|) = function
+        | Of_a_Kind 2 r -> Some r
+        | _ -> None
+      let (|IsPair|_|) (h: Hand) =
+        match h.Cards with
+        | HighPair r -> Some (Pair r)
+        | _ -> None
+      let (|TwoPair|_|) (h: Hand) = 
+        match h.Cards with
+        | HighPair r ->
+          let rest = h.Cards |> List.filter (fun c -> c.Rank <> r)
+          match rest with
+          | HighPair r2 -> Some (``Two Pair`` (r, r2))
+          | _ -> None
+        | _ -> None
+      
+
       let (|HighCard|) (h: Hand) = ``High Card`` h.Cards.[0]
 
       match h with
       | StraightFlush f -> f
-      | Four_of_a_Kind f -> f
+      | Four_of_a_Kind f -> (``Four of a Kind`` f)
+      | FullHouse f -> f
       | IsFlush f -> f
       | IsStraight f -> f
-      | Three_of_a_Kind f -> f
+      | Three_of_a_Kind f -> (``Three of a Kind`` f)
+      | TwoPair f -> f
+      | IsPair f -> f
       | HighCard c -> c
+
+  type Deck = 
+  | D of seq<Card>
+    static member New = [ for r in Rank.Ranks do 
+                          for s in Suit.Suits -> C (r, s)]
+    
+  type Dealer() = 
+    static member Shuffle = Deck.New
+    
