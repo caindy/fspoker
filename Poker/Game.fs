@@ -10,7 +10,7 @@ module Poker =
       | R (_,f) -> f
     member r.Value = let (R(v,_)) = r in v
     static member Ranks = seq { 
-      for i in [1..10] do yield R(i, i.ToString())
+      for i in [2..10] do yield R(i, i.ToString())
       yield! [|  R(11, "J") ; R(12, "Q") ; R(13, "K") ; R(14, "A") |]
     }
     static member Parse(s) = Seq.tryFind (fun r -> r.ToString() = s) Rank.Ranks
@@ -134,6 +134,7 @@ module Poker =
                                          && high - c2 = 2 
                                          && high - c3 = 3 
                                          && high - low = 4 -> Some (Straight highCard.Rank)
+        | [ 14; 1; 2; 3; 4] -> Some (Straight (R(4, "4")))
         | _ -> None
 
       let (|StraightFlush|_|) (h: Hand) =
@@ -185,7 +186,6 @@ module Poker =
           | HighPair r2 -> Some (``Two Pair`` (r, r2))
           | _ -> None
         | _ -> None
-      
 
       let (|HighCard|) (h: Hand) = ``High Card`` h.Cards.[0]
 
@@ -200,15 +200,120 @@ module Poker =
       | IsPair f -> f
       | HighCard c -> c
 
-  type Deck() = 
-    let rng = new MathNet.Numerics.Random.MersenneTwister()
-    let mutable deck = [| for r in Rank.Ranks do
-                          for s in Suit.Suits -> C (r, s) |]
-    member __.NextCard() = 
-      let slot = rng.Next(0, deck.Length)
+  let rec removeOneAtRandom (deck: array<Card>) (rng:System.Random) = seq {
+    let remainingCards = Seq.length deck 
+    while remainingCards > 0 do
+      let slot = rng.Next(0, remainingCards)
       let card = deck.[slot]
-      deck <- Array.filter (fun c -> not (Object.ReferenceEquals(c, card))) deck
-      card
+      let remainder = Array.filter (fun c -> not (Object.ReferenceEquals(c, card))) deck
+      yield card
+      yield! (removeOneAtRandom remainder rng)
+  }
 
-    interface IDisposable with
-      override __.Dispose() = rng.Dispose()
+  let shuffledDeck () = 
+    use rng = new MathNet.Numerics.Random.MersenneTwister()
+    let deck = [| for r in Rank.Ranks do
+                  for s in Suit.Suits -> C (r, s) |]
+    removeOneAtRandom deck rng
+
+
+  type Name = string
+  type Chips = int
+  type Player = Name*Chips
+  type Bet = Player*Chips
+  type Action =
+  | Call of Player
+  | Raise of Player*Chips
+  | AllIn of Player
+  | Fold of Player
+
+  type Board = 
+    {
+    Flop  : (Card*Card*Card) option
+    Turn  : Card option
+    River : Card option 
+    }
+      static member Empty = {Flop=None;Turn=None;River=None}
+    
+
+  type River = Card option
+  type NoLimitHoldEm = 
+    {
+    Players    : seq<Player>
+    Current    : Player
+    Button     : Player
+    SmallBlind : Bet
+    BigBlind   : Bet
+    CurrentBet : Chips
+    LastRaise  : Bet
+    HoleCards  : seq<Player*seq<Card>>
+    Board      : Board 
+    } 
+      member this.MinimumRaise  = //this can change if e.g. playing limit poker
+        match this.Board with
+        | {Flop = None} -> let (_,m) = this.BigBlind in m
+        |  _ -> let (_,m) = this.LastRaise in m
+
+  type Result =
+  | Win of Player*Chips
+  | Split of Player*Player*Chips
+
+  type Game(players:seq<Player>, small:Chips) =
+    let deck = shuffledDeck()
+    let numPlayers = players |> Seq.length
+    let bigBlindAmount = small * 2
+    let inPosition = Seq.nth
+    let bigBlind = players |> inPosition 2, bigBlindAmount
+    let start = {
+      Players = players
+      Button = players |> inPosition 0
+      SmallBlind = players |> inPosition 1, small 
+      BigBlind = bigBlind
+      Current = players |> inPosition 3
+      HoleCards = [for p in players -> (p, Seq.take 2 deck)]
+      Board = Board.Empty; LastRaise = bigBlind; CurrentBet = bigBlindAmount
+    }
+    let server = MailboxProcessor<Action>.Start(fun inbox ->
+      let rec betting (deck:seq<Card>) (game:NoLimitHoldEm) =
+        let getPos p = game.Players |> Seq.findIndex ((=) p)
+        let nextPlayer p = 
+          let lastIndex = game.Players |> Seq.last |> getPos
+          match getPos p with
+          | lastIndex -> game.Players |> inPosition 0
+          | i when i < lastIndex -> game.Players |> inPosition (i+1)
+        let playBet p a =
+          let pos = getPos p
+          let (name, chips) = p
+          { game with Players = seq {
+                                  yield! game.Players |> Seq.take pos 
+                                  yield (name, chips - a)
+                                  if (game.Players |> Seq.length) < pos+1 then
+                                    yield! game.Players |> Seq.skip (pos+1)
+                                }
+                      CurrentBet = a
+          }
+        async {
+          let! msg = inbox.Receive()
+          match msg with
+          | Fold p when p = game.Current -> 
+            let players = game.Players |> Seq.filter ((<>) p)
+            do! betting deck {game with Players = players}
+          | Call p ->
+            let next = nextPlayer p
+            let (lastRaise, _) = game.LastRaise
+            let bettingCompleted = next = lastRaise
+            let game = playBet p game.CurrentBet
+            do! betting deck { game with Current = next }
+          | Raise (p,a) when a >= game.MinimumRaise -> 
+            let next = nextPlayer p
+            let bet = (a+game.CurrentBet)
+            let game = playBet p bet
+            do! betting deck { game with Current = next; LastRaise = (p,bet) }
+          | AllIn _ -> ()
+          | _ -> do! betting deck game
+        }
+      betting deck start)
+    member this.Fold p = server.Post (Fold p)
+    member this.Call p = server.Post (Call p)
+    member this.Raise p a = server.Post (Raise (p,a))
+
