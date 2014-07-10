@@ -16,3 +16,9 @@ type BettingTests() =
     let game = Round(players = fourPlayers, small = 5)
     Assert.AreEqual(10, game.State.BigBlind |> snd)
 
+  [<Test>]
+  member x.``Four players: small blind 5, first to act raises 10, making her bet 20``() =
+    let game = Round(players = fourPlayers, small = 5)
+    let newGame = { game.State with History = seq { yield! game.State.History; 
+                                                    yield Raise(game.State.Current, 10) }}
+    Assert.AreEqual(20, newGame.CurrentBet)

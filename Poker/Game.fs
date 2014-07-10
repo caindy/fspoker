@@ -299,30 +299,26 @@ module Poker =
     let mutable state = start
     let server = MailboxProcessor<Action>.Start(fun inbox ->
       let rec betting deck game holeCards =
-        let getPos p = game.Players |> Seq.findIndex ((=) p)
-        let nextPlayer p = 
-          let lastIndex = game.Players |> Seq.last |> getPos
-          match getPos p with
-          | lastIndex -> game.Players |> inPosition 0
-          | i when i < lastIndex -> game.Players |> inPosition (i+1)
-
+        let nextPlayerToAct = 
+          game.Players |> Seq.skipWhile ((<>) game.Current) |> Seq.head
         state <- game
-
         async {
           //TODO: send current state to all
           let! msg = inbox.Receive()
           let newGameState = 
+            let defaultNewState = 
+              {game with History = seq { yield! game.History; yield msg }
+                         Current = nextPlayerToAct }
             match msg with
             | Fold p when p = game.Current ->
               let remainingPlayers = game.Players |> Seq.filter ((<>) game.Current)
               {game with Players = remainingPlayers 
                          History = seq { yield! game.History; yield msg }}
-            | Call p when p = game.Current ->
-              {game with History = seq { yield! game.History; yield msg }}
-            | Raise (p,amt) when amt >= game.MinimumRaise && p = game.Current  ->
-              let bet = amt + game.CurrentBet
-              {game with History = seq { yield! game.History; yield msg }}
-            | _ -> failwith "not implemented"
+            | Call p when p = game.Current -> 
+              defaultNewState
+            | Raise (p,amt) when amt >= game.MinimumRaise && p = game.Current ->
+              defaultNewState
+            | _ -> game
           do! betting deck newGameState holeCards
         }
       betting deck start holeCards)
