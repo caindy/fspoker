@@ -47,7 +47,14 @@ let benchmark () =
   }  |> Seq.last |> (fun (t,i) -> printfn "took %i for %A" t i)
 time benchmark |> (fun (t,_) -> printfn "total elapsed: %i" t)
 
-type Foo =
-  | F of int
-let g (p:Quotations.Expr<int -> string>) x = <@@ let i = (%%p x) in i @@>
-<@ F @>
+
+
+type Bar =
+| X of int
+| Y of int
+
+let x = 5
+let msg = X 5
+match msg with
+| X x when x = x -> "x"
+| Y y -> "y"

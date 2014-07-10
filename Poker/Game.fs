@@ -85,7 +85,9 @@ module Poker =
           | Flush(xf),              Flush(yf)                -> highcard xf yf
           | Straight(xf),           Straight(yf)             -> highcard xf yf
           | ``Three of a Kind``(xf), ``Three of a Kind``(yf) -> highcard xf yf
-          | ``Two Pair``(xfh,xfl),   ``Two Pair``(yfh,yfl)   -> let c = highcard xfh yfh in if c = 0 then highcard xfl yfl else c
+          | ``Two Pair``(xfh,xfl),   ``Two Pair``(yfh,yfl)   -> 
+            let c = highcard xfh yfh
+            if c = 0 then highcard xfl yfl else c
           | Pair(xf),                Pair(yf)                -> highcard xf yf
           | ``High Card``(xf),      ``High Card``(yf)        -> highcard xf yf 
           | _, _ -> (HandRanking.Order xRank) - (HandRanking.Order yRank)
@@ -210,23 +212,17 @@ module Poker =
       yield! (removeOneAtRandom remainder rng)
   }
 
-  let shuffledDeck () = 
-    use rng = new MathNet.Numerics.Random.MersenneTwister()
-    let deck = [| for r in Rank.Ranks do
-                  for s in Suit.Suits -> C (r, s) |]
-    removeOneAtRandom deck rng
+  type Deck() = 
+    let shuffledDeck = 
+      use rng = new MathNet.Numerics.Random.MersenneTwister()
+      let deck = [| for r in Rank.Ranks do
+                    for s in Suit.Suits -> C (r, s) |]
+      removeOneAtRandom deck rng
+    member __.TakeCard() = shuffledDeck |> Seq.take 1 |> Seq.head
 
 
   type Name = string
   type Chips = int
-  type Player = Name*Chips
-  type Bet = Player*Chips
-  type Action =
-  | Call of Player
-  | Raise of Player*Chips
-  | AllIn of Player
-  | Fold of Player
-
   type Board = 
     {
     Flop  : (Card*Card*Card) option
@@ -234,86 +230,102 @@ module Poker =
     River : Card option 
     }
       static member Empty = {Flop=None;Turn=None;River=None}
-    
 
-  type River = Card option
-  type NoLimitHoldEm = 
+  let raises = Seq.map snd >> Seq.pairwise >> Seq.toList
+  let rec currentBet r acc =
+          match r with
+          | [] -> acc
+          | (p,n)::rest -> currentBet rest (acc + (n + p))
+
+  type Player(name, chips) = 
+    let inbox = MailboxProcessor<PlayerMessage>.Start(fun inbox -> async { return () })
+    member __.Name = name
+    member __.Chips = chips
+  and Position = Player*int
+  and Bet = Player*Chips
+  and HoleCards = Player*Card*Card
+  and PlayerMessage = 
+    | State    of GameState*HoleCards  
+    | YourTurn of GameState*HoleCards
+    | Chat     of string
+  and GameState = 
     {
     Players    : seq<Player>
     Current    : Player
-    Button     : Player
-    SmallBlind : Bet
-    BigBlind   : Bet
-    CurrentBet : Chips
-    LastRaise  : Bet
-    HoleCards  : seq<Player*seq<Card>>
+    History    : seq<Action>
     Board      : Board 
     } 
-      member this.MinimumRaise  = //this can change if e.g. playing limit poker
-        match this.Board with
-        | {Flop = None} -> let (_,m) = this.BigBlind in m
-        |  _ -> let (_,m) = this.LastRaise in m
+      member x.MinimumRaise  = //this can change if e.g. playing limit poker
+        match x.Board with
+        | {Flop = None} -> snd x.BigBlind 
+        |  _            -> snd x.LastRaise 
+      member x.Bets = 
+        x.History |> Seq.choose (function | Raise b -> Some b | _ -> None)
+      member x.LastRaise =
+        x.Bets |> Seq.last
+      member x.CurrentBet = 
+        currentBet (x.Bets |> raises) 0
+      member x.SmallBlind = x.Bets |> Seq.head 
+      member x.BigBlind   = 
+        let (p,r) = x.Bets |> Seq.nth 1
+        let bigBlindAmt = currentBet (x.Bets |> Seq.take 2 |> raises) 0
+        p, bigBlindAmt
+
+  and Action =
+  | Call  of Player
+  | Raise of Bet
+  | AllIn of Player
+  | Fold  of Player
 
   type Result =
   | Win of Player*Chips
   | Split of Player*Player*Chips
 
-  type Game(players:seq<Player>, small:Chips) =
-    let deck = shuffledDeck()
+  type Round(players:seq<Player>, small:Chips) =
+    let deck = Deck()
     let numPlayers = players |> Seq.length
-    let bigBlindAmount = small * 2
-    let inPosition = Seq.nth
-    let bigBlind = players |> inPosition 2, bigBlindAmount
+    let inPosition i players = Seq.nth (i % (Seq.length players)) players
+    let holeCards : seq<HoleCards> = seq {
+      for p in players -> (p, deck.TakeCard(), deck.TakeCard())
+    } 
+    let smallBlind = Raise (players |> inPosition 2, small)
+    let bigBlind   = Raise (players |> inPosition 3, small)
     let start = {
-      Players = players
-      Button = players |> inPosition 0
-      SmallBlind = players |> inPosition 1, small 
-      BigBlind = bigBlind
-      Current = players |> inPosition 3
-      HoleCards = [for p in players -> (p, Seq.take 2 deck)]
-      Board = Board.Empty; LastRaise = bigBlind; CurrentBet = bigBlindAmount
+      Players    = players
+      Current    = players |> inPosition 4
+      Board      = Board.Empty
+      History =  [| smallBlind; bigBlind |]
     }
+    let mutable state = start
     let server = MailboxProcessor<Action>.Start(fun inbox ->
-      let rec betting (deck:seq<Card>) (game:NoLimitHoldEm) =
+      let rec betting deck game holeCards =
         let getPos p = game.Players |> Seq.findIndex ((=) p)
         let nextPlayer p = 
           let lastIndex = game.Players |> Seq.last |> getPos
           match getPos p with
           | lastIndex -> game.Players |> inPosition 0
           | i when i < lastIndex -> game.Players |> inPosition (i+1)
-        let playBet p a =
-          let pos = getPos p
-          let (name, chips) = p
-          { game with Players = seq {
-                                  yield! game.Players |> Seq.take pos 
-                                  yield (name, chips - a)
-                                  if (game.Players |> Seq.length) < pos+1 then
-                                    yield! game.Players |> Seq.skip (pos+1)
-                                }
-                      CurrentBet = a
-          }
-        async {
-          let! msg = inbox.Receive()
-          match msg with
-          | Fold p when p = game.Current -> 
-            let players = game.Players |> Seq.filter ((<>) p)
-            do! betting deck {game with Players = players}
-          | Call p ->
-            let next = nextPlayer p
-            let (lastRaise, _) = game.LastRaise
-            let bettingCompleted = next = lastRaise
-            let game = playBet p game.CurrentBet
-            do! betting deck { game with Current = next }
-          | Raise (p,a) when a >= game.MinimumRaise -> 
-            let next = nextPlayer p
-            let bet = (a+game.CurrentBet)
-            let game = playBet p bet
-            do! betting deck { game with Current = next; LastRaise = (p,bet) }
-          | AllIn _ -> ()
-          | _ -> do! betting deck game
-        }
-      betting deck start)
-    member this.Fold p = server.Post (Fold p)
-    member this.Call p = server.Post (Call p)
-    member this.Raise p a = server.Post (Raise (p,a))
 
+        state <- game
+
+        async {
+          //TODO: send current state to all
+          let! msg = inbox.Receive()
+          let newGameState = 
+            match msg with
+            | Fold p when p = game.Current ->
+              let remainingPlayers = game.Players |> Seq.filter ((<>) game.Current)
+              {game with Players = remainingPlayers 
+                         History = seq { yield! game.History; yield msg }}
+            | Call p when p = game.Current ->
+              {game with History = seq { yield! game.History; yield msg }}
+            | Raise (p,amt) when amt >= game.MinimumRaise && p = game.Current  ->
+              let bet = amt + game.CurrentBet
+              {game with History = seq { yield! game.History; yield msg }}
+            | _ -> failwith "not implemented"
+          do! betting deck newGameState holeCards
+        }
+      betting deck start holeCards)
+    member this.State with get() = state
+
+//TODO: heads up

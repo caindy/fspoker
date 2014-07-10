@@ -5,7 +5,7 @@ open LearnYouSomePoker.Poker
 
 
 [<TestFixture>]
-type Test() = 
+type PokerHandsTests() = 
 
   let h = Hand.Parse
   let isThreeOfAKind h = match HandRanking.For h with | ``Three of a Kind`` _ -> true | _ -> false
@@ -100,8 +100,8 @@ type Test() =
 
   [<Test>]
   member x.``Can compare to drawn hands``() =
-    use deck = new Deck()
-    let hand1 = [for x in [1..5] do yield deck.NextCard()]
-    let hand2 = [for x in [1..5] do yield deck.NextCard()]
+    let deck = Deck()
+    let hand1 = Hand [|for _ in 1..5 do yield deck.TakeCard()|]
+    let hand2 = Hand [|for _ in 1..5 do yield deck.TakeCard()|]
     printfn "Hand1: %A \nHand2: %A" hand1 hand2
     Assert.That ((hand1 > hand2) || (hand2 >= hand1))
